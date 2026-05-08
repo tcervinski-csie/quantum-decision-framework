@@ -1,0 +1,24 @@
+{
+  "name": "quantum_decision",
+  "description": "Analyze a computational problem to determine if quantum computing provides an advantage, and if so, generate and execute the appropriate quantum circuit. Always call this tool before deciding whether to use quantum or classical approaches.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "problem_description": {
+        "type": "string",
+        "description": "Natural language description of the computational problem to analyze."
+      },
+      "shots": {
+        "type": "integer",
+        "description": "Number of measurement shots for quantum execution (default: 1024).",
+        "default": 1024
+      },
+      "parameter_values": {
+        "type": "array",
+        "items": {"type": "number"},
+        "description": "Parameter values for variational circuits (QAOA, VQE). Required if the selected algorithm uses parameterized circuits."
+      }
+    },
+    "required": ["problem_description"]
+  }
+}

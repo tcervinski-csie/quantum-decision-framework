@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantum-agent"
+version = "0.1.0"
+description = "Paradigm-Aware Code Agent for Hybrid Classical-Quantum Task Routing"
+requires-python = ">=3.10"
+dependencies = [
+    "qiskit>=1.0",
+    "qiskit-aer>=0.13",
+    "qiskit-ibm-runtime>=0.20",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

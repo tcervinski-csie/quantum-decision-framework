@@ -1,0 +1,262 @@
+A Decision Framework for Paradigm-Aware Quantum Code Generation in Autonomous Agent Systems
+
+[Your Name], Bucharest University of Economic Studies, Faculty of Cybernetics, Statistics and Economic Informatics, Bucharest, Romania
+
+Abstract
+
+Cloud platforms such as IBM Quantum have made quantum hardware more accessible for research and experimentation. Meanwhile, autonomous agents powered by Large Language Models (LLMs) are increasingly being used to generate code automatically across various domains. However, when these agents receive a computational problem from a user, they often struggle to decide whether quantum computing offers any real benefits or if the problem is better suited for classical hardware. To address this gap, a decision framework consisting of three stages is proposed. In the first stage, structural features are extracted from the problem description, including the type of problem, the size of the search space, and whether a verification oracle is present. The second stage involves assigning a quantum advantage classification based on current knowledge about NISQ-era algorithms. The third stage verifies whether the resulting circuit can be executed on real hardware, taking into account qubit limits and circuit depth. Circuit generation is implemented for three algorithms: Grover's search, QAOA for combinatorial optimization, and VQE for molecular simulation, tested on the Qiskit Aer simulator with depolarizing and thermal relaxation noise models. The evaluation uses a benchmark of 15 standard and 12 adversarial problem descriptions. An ablation study compares the framework against a standalone LLM (Claude Haiku 4.5) given the same problems but without access to the classification pipeline. The results show that the framework achieves 75% accuracy on adversarial inputs, compared to 67% for the bare LLM. What is more interesting is that the two approaches fail on different categories of problems. The LLM tends to be influenced by quantum-related terminology in the description, while the framework misclassifies problems that use non-standard phrasing. The implementation has been validated with 98 automated tests at 96% code coverage and demonstrated through integration with the Agent Zero autonomous agent platform.
+
+Keywords: quantum computing, NISQ algorithms, decision framework, autonomous agents, Grover's algorithm, QAOA, VQE, Qiskit
+
+
+1. Introduction
+
+Quantum computing is still in its early days, often referred to as the Noisy Intermediate-Scale Quantum (NISQ) era [1]. This means that while processors have reached tens to hundreds of qubits, fault-tolerant computations are not yet possible due to gate errors and decoherence. Despite these limitations, several algorithms can produce useful results on this type of hardware. Grover's search [2] gives a quadratic speedup for unstructured search when a verification oracle is available. The Quantum Approximate Optimization Algorithm (QAOA) [3] addresses combinatorial optimization problems like MaxCut. The Variational Quantum Eigensolver (VQE) [4] targets molecular ground state energy calculations. IBM has made such hardware available through cloud access, with the Eagle processor providing 127 superconducting qubits [5].
+
+Large language models have been integrated into autonomous agent architectures, meaning systems where the model reasons about a task, picks tools, and executes actions until reaching a result. ReAct [6], Toolformer [7], and similar frameworks showed that LLMs can handle complex workflows if given the right tools. But these agents do not have built-in logic for domain-specific decisions. If a user describes a computational problem, the agent relies on whatever knowledge is encoded in its weights, and for specialized fields like quantum computing this knowledge is not always accurate.
+
+The gap becomes visible with a concrete example. Suppose an agent receives: "search through 100,000 unsorted records to find one that matches a regulatory condition." A general LLM may or may not identify this as fitting Grover's algorithm. And even if it does, it cannot reliably check whether the problem scale is suitable for current hardware, whether circuit depth stays within noise limits, or whether the description actually implies a verifiable oracle.
+
+This paper presents a three-stage decision framework for this problem. The first stage extracts features from the problem description, namely type, search space size, oracle availability, and number of variables. The second stage classifies quantum advantage through a deterministic mapping based on known properties of NISQ algorithms. The third stage gates the recommendation against hardware constraints (qubit count, circuit depth, backend topology) and routes computation to quantum hardware, a simulator, or classical execution. If a quantum algorithm is selected, the corresponding Qiskit [8] circuit is generated and executed.
+
+The framework is integrated as a tool in the Agent Zero autonomous agent platform. The evaluation covers three parts: (1) a benchmark with 15 standard and 12 adversarial problem descriptions, (2) an ablation study comparing classification accuracy against a standalone LLM, and (3) a QAOA performance evaluation with noise simulation. Validation is done through 98 automated tests with 96% code coverage.
+
+The rest of the paper is structured as follows. Section 2 covers background and related work. Section 3 describes the system architecture. Section 4 presents the decision framework. Section 5 discusses implementation. Section 6 contains evaluation and discussion. Section 7 concludes.
+
+
+2. Background and Related Work
+
+2.1 NISQ-Era Quantum Computing
+
+The concept of NISQ, first introduced by Preskill [1], refers to quantum processors with 50-100+ qubits that lack the error correction needed for fault-tolerant algorithms like Shor's factoring [9]. In practice, only algorithms with shallow circuits and moderate qubit counts can produce useful outputs on today's hardware. Three algorithm families are considered the most promising for near-term quantum utility.
+
+Grover's algorithm [2] achieves a quadratic speedup for unstructured search. Given a database of N items, it finds the marked item in O(sqrt(N)) oracle calls rather than O(N). The algorithm requires a quantum oracle, a unitary that flips the phase of the target state, and the speedup is only valid when such oracle can actually be built. For N = 2^n items, n qubits are needed and roughly pi/4 * sqrt(N) iterations of oracle plus diffusion operator.
+
+QAOA, introduced by Farhi et al. [3], is a variational algorithm for combinatorial optimization, especially problems that can be written as Ising Hamiltonians. It uses p layers of alternating cost and mixer unitaries, with parameters gamma and beta for each layer that get optimized by a classical routine. In the MaxCut formulation on a graph G = (V, E), the cost operator encodes ZZ interactions on each edge while the mixer applies X rotations. More layers generally improve the solution quality, but also make the circuit deeper and more affected by noise.
+
+VQE [4] was designed for computing ground state energies of molecular Hamiltonians. A parameterized circuit (the ansatz) prepares trial quantum states, the Hamiltonian expectation value is measured, and a classical optimizer adjusts the parameters to minimize it. For NISQ devices, the hardware-efficient ansatz [10] is commonly used, consisting of single-qubit Ry rotation layers alternated with CNOT entangling gates.
+
+2.2 LLM-Based Autonomous Agents
+
+Schick et al. [7] formalized the idea of giving language models access to external tools in Toolformer, where the model generates special tokens to call APIs during text generation. Yao et al. [6] proposed ReAct, an approach that interleaves reasoning traces with tool actions so the model can decide at each step what to do next. Systems like AutoGPT, BabyAGI, and Agent Zero took these ideas further into fully autonomous loops where the agent maintains its own task queue and works through it without human intervention at each step.
+
+Agent Zero specifically is an open-source agent framework built around a plugin architecture for custom tools. Each tool is implemented as a Python class with an execute method. When the agent determines that a tool is relevant for the current task, it calls the method and receives structured output that it incorporates into its reasoning chain. This makes it a good fit for adding domain-specific modules, since the agent keeps control of the conversation but can delegate specialized decisions to external logic.
+
+2.3 Quantum Algorithm Selection
+
+There are several works at the intersection of quantum computing and automated systems. Alam et al. [11] proposed methods for quantum circuit compilation, and surveys on quantum machine learning [12] have analyzed theoretical foundations for quantum advantage in learning tasks. These works however focus on applying quantum computing to machine learning, not on the reverse question of deciding when quantum computing should be applied at all.
+
+The general problem of algorithm selection (choosing which algorithm fits a given problem instance) was formalized by Rice [13] for classical computing. The framework presented in this paper adapts that perspective to the quantum/classical boundary, with the additional difficulty that hardware constraints are not fixed but change as processors improve.
+
+To the best of the authors' knowledge, no existing work combines all of: natural language problem analysis, quantum suitability classification, hardware feasibility gating, circuit generation, and integration into an autonomous agent system.
+
+
+3. System Architecture
+
+The system is organized as a pipeline of four modules, with an agent interface layer on top that handles natural language input and structured output. The data flow is shown in Figure 1.
+
+Problem Analyzer -> Decision Engine -> Code Generator -> Executor
+
+The Problem Analyzer takes a free-text problem description and extracts structured features through keyword matching and regular expressions. It classifies the problem into one of seven categories (unstructured search, combinatorial optimization, quantum simulation, linear algebra, cryptographic, machine learning, other) and also extracts search space size, oracle availability, structural properties, and variable count. No LLM is involved in this module, all logic is deterministic.
+
+The Decision Engine is the central component and implements the three-stage framework described in Section 4. It receives structured features, classifies the quantum advantage level, estimates resource requirements (qubits and circuit depth), and checks feasibility against hardware constraints. The output is a Decision object with the recommended algorithm, advantage classification, execution target, resource estimates, confidence score, and reasoning text.
+
+The Code Generator receives the Decision and produces a Qiskit QuantumCircuit object. Three algorithms are supported: Grover's search with a configurable marked-state oracle, QAOA for MaxCut with parameterized gamma/beta layers, and VQE with a hardware-efficient Ry-CNOT ladder ansatz. All generated circuits include measurement gates and can be executed directly.
+
+The Executor runs circuits on the backend selected by the decision engine, either Qiskit Aer simulator for simulation targets or IBM Quantum hardware through qiskit-ibm-runtime for hardware targets. It binds parameter values for variational circuits (QAOA, VQE), collects measurement statistics, and returns structured results with the most probable outcome, shot count, and execution status.
+
+The Agent Interface connects these modules into a single callable function quantum_decision() that Agent Zero invokes as a tool. The agent passes in a problem description in natural language and receives back a dictionary with the full analysis chain.
+
+
+4. The Quantum Decision Framework
+
+4.1 Stage 1: Feature Extraction
+
+The first stage turns a problem description into a structured feature vector. An ordered list of pattern groups is used, where each group corresponds to a problem type and has a base confidence score. The ordering matters because more specific patterns are checked first. Quantum simulation keywords (e.g., "hamiltonian", "molecular", "ground state") come before combinatorial optimization ones (e.g., "optimize", "maximize", "partition"), which come before unstructured search patterns (e.g., "search", "find"). Without this ordering, an optimization problem containing the word "find" would incorrectly match as search.
+
+Oracle detection uses two separate pattern lists. The positive list contains terms like "verify", "oracle", "check", "constraint", "condition". The negative list has terms like "subjective", "best item", "preference", and these are checked first to avoid false positives. For instance, a description saying "find the best item based on subjective criteria" should not be marked as having an oracle, even though "criteria" would match the positive patterns.
+
+For extracting numeric sizes, several formats are handled: direct counts ("10000 elements"), qubit counts ("6 qubits"), power-of-two notation ("2^16"), and numbers with comma separators ("100,000 records"). The comma case needed special treatment, so a preprocessing step with regular expressions normalizes groups like "100,000" to "100000" before the size extraction patterns run. This was discovered during live testing with Agent Zero, where the agent passed descriptions with comma-formatted numbers and the analyzer returned incorrect sizes.
+
+4.2 Stage 2: Quantum Advantage Classification
+
+Classification is done through a lookup table that maps each problem type to an advantage level, a recommended algorithm, and a base confidence. The mappings are shown in Table 1.
+
+Table 1. Classification mappings from problem type to quantum recommendation.
+
+Problem Type           Advantage               Algorithm    Confidence
+Unstructured search    Clear advantage          Grover       0.85
+Combinat. optimization Potential advantage      QAOA         0.55
+Quantum simulation     Clear advantage          VQE          0.90
+Cryptographic          No current advantage     None         0.95
+Linear algebra         No current advantage     None         0.80
+Machine learning       Classical preferred      None         0.70
+Other                  Classical preferred      None         0.50
+
+Two conditional rules modify these base mappings. The first one concerns Grover's algorithm: it requires both a verification oracle and a search space of at least 64 elements. Below this size, the overhead from quantum state preparation and the O(sqrt(N)) iterations does not compensate for the constant factors, and classical brute force finishes faster. The second rule handles problem types that need fault-tolerant quantum computing, specifically cryptographic problems (Shor's algorithm [9]) and linear algebra (HHL [14]). These are always classified as "no current advantage" since both algorithms require error correction at a scale not available on NISQ hardware.
+
+The confidence values are set according to how well each algorithm's practical utility is established. VQE for quantum simulation has the highest confidence (0.90) because molecular energy estimation on small systems is the most validated NISQ application so far [4, 15]. QAOA gets the lowest non-trivial confidence (0.55) because whether QAOA actually outperforms classical solvers for optimization is still under debate [16].
+
+4.3 Stage 3: Hardware Feasibility Gate
+
+The last stage checks whether the circuit that would be generated can run on real hardware. Resource requirements are estimated first, namely qubit count and circuit depth, depending on the algorithm and problem size:
+
+Grover: n = ceil(log2(N)) qubits, depth = ceil(sqrt(N)) * n
+QAOA: n = number of variables, depth = 2n per layer
+VQE: n = number of variables, depth = 4n
+
+These estimates are compared against hardware constraints that default to IBM Eagle specifications: maximum 127 qubits and maximum circuit depth of 100. Three routing outcomes are possible:
+
+1. Quantum hardware, when the circuit fits within both qubit and depth limits
+2. Quantum simulator, when the circuit exceeds hardware limits but needs 30 qubits or less
+3. Classical, when more than 30 qubits are needed and hardware limits are exceeded
+
+This three-way distinction matters because it separates problems that are quantum-appropriate but exceed current hardware (these can still be validated on simulator) from problems that are not suited for quantum computation at all.
+
+
+5. Implementation
+
+5.1 Circuit Generation
+
+Qiskit QuantumCircuit objects are generated for each of the three supported algorithms.
+
+For Grover's algorithm, the circuit follows the standard construction: all qubits are initialized in uniform superposition with Hadamard gates, then the oracle and diffusion operator are applied for floor(pi/4 * sqrt(N)) iterations, and finally all qubits are measured. The oracle marks the target state using a multi-controlled Z pattern: X gates are applied on qubits where the marked state has bit value 0, then a multi-controlled X gate with Hadamard on the target qubit implements the phase flip, and the X gates are reversed.
+
+The QAOA circuit for MaxCut has p layers, each with two parameters gamma and beta. In the cost layer, a ZZ interaction is applied for each graph edge (i, j) through the decomposition CNOT(i,j), Rz(2*gamma, j), CNOT(i,j). The mixer layer applies Rx(2*beta) on every qubit. Parameters are kept as Qiskit Parameter objects so they can be bound later during classical optimization.
+
+The VQE ansatz follows a hardware-efficient Ry-CNOT ladder structure. Each layer has Ry(theta) rotations on all qubits followed by a linear CNOT chain (qubit i controlling qubit i+1). After the last entangling layer, one more rotation layer is added without entanglement. With d layers and n qubits, the total parameter count is n(d+1).
+
+5.2 Noise Models
+
+Two noise models are implemented using the Qiskit Aer noise module.
+
+Depolarizing noise adds a depolarizing channel after each gate. Single-qubit gates get error rate p1 and two-qubit gates get p2 = 10*p1, since entangling operations typically have higher error rates on real hardware. Three error levels are tested: p1 in {0.001, 0.005, 0.01}.
+
+Thermal relaxation noise simulates energy decay (T1) and dephasing (T2). The parameters match typical IBM superconducting qubit characteristics: T1 = 100 us, T2 = 80 us, single-qubit gate time 50 ns. Two-qubit gates use 10x longer gate times.
+
+5.3 Agent Zero Integration
+
+Three components connect the framework to Agent Zero: (1) a tool class extending Agent Zero's Tool base class, whose execute method parses arguments, calls the quantum_decision() pipeline, and formats output as text; (2) a tool prompt in markdown describing the tool's purpose and accepted arguments; (3) a system prompt extension that adds quantum computing awareness to the agent's base prompt. Everything runs inside a Docker container built on the Agent Zero image, with Qiskit Aer as the simulation backend.
+
+
+6. Evaluation
+
+6.1 Benchmark Design
+
+Two benchmark sets were constructed. The standard benchmark has 15 problems with ground-truth labels: 6 true positives (2 Grover, 2 QAOA, 2 VQE), 4 true negatives (ML classification, regression, small search space, sorting), 3 traps (RSA factoring, large linear system, search without oracle), and 2 edge cases (job scheduling and graph coloring).
+
+The adversarial benchmark has 12 problems meant to mislead either an LLM or a rule-based classifier, in four categories:
+
+- Hype bait (5 problems): descriptions using the word "quantum" explicitly but describing non-quantum tasks.
+- Disguised quantum (3 problems): no quantum terminology at all, but the underlying problem has a quantum solution.
+- Scale traps (2 problems): correct algorithm in theory but wrong scale.
+- Misdirection (2 problems): the user suggests a specific wrong algorithm.
+
+6.2 Ablation Study: Framework vs. Bare LLM
+
+The decision framework is compared against a bare LLM (Claude Haiku 4.5) receiving the same problem descriptions but without access to the classification pipeline. The LLM gets a system prompt describing the available algorithms, NISQ constraints, and the expected JSON output format.
+
+On the 15 standard problems, the framework achieves 100% on both algorithm selection and advantage classification. The bare LLM reaches 87-93% on algorithm accuracy and 67-73% full accuracy when both algorithm and advantage level must be correct. The most frequent LLM error is overstating the quantum advantage, for example picking the right algorithm but classifying QAOA as "clear advantage" when ground truth is "potential advantage."
+
+On the 12 adversarial problems, the framework gets 9/12 correct (75%) and the LLM gets 8/12 (67%). The more interesting observation is that they fail on different problems. The LLM is more susceptible to hype bait, meaning that when the description mentions "quantum," the LLM tends to agree it is appropriate. The framework has difficulty with disguised quantum problems that use non-standard phrasing. Misdirection problems are difficult for both.
+
+Table 2. Adversarial benchmark results by category.
+
+Category             Problems   LLM Correct   Framework Correct
+Hype bait            5          3/5           4/5
+Disguised quantum    3          2/3           2/3
+Scale traps          2          1/2           2/2
+Misdirection         2          2/2           1/2
+Total                12         8/12 (67%)    9/12 (75%)
+
+The difference in accuracy is not large. What matters more is that the framework gives deterministic results with a full reasoning trace, while the LLM brings contextual understanding that pattern matching cannot replicate. The two approaches are complementary rather than one being strictly better.
+
+6.3 QAOA Performance Analysis
+
+QAOA MaxCut performance is evaluated across three graph topologies (ring, complete, and Erdos-Renyi random with edge probability 0.5) at sizes n in {4, 6, 8} and with p in {1, 2} QAOA layers. Parameter optimization uses COBYLA [17] with 3 random restarts and 50 iterations per restart. The reported metric is the approximation ratio: the expected cut achieved by QAOA divided by the optimal cut found through brute force.
+
+Table 3. QAOA approximation ratios across graph types and circuit depths.
+
+Graph         n    p=1 Ratio   p=2 Ratio   Improvement
+Ring          4    0.875       0.938       +0.063
+Ring          6    0.833       0.889       +0.056
+Ring          8    0.813       0.844       +0.031
+Complete      4    0.833       0.889       +0.056
+Complete      6    0.800       0.853       +0.053
+Complete      8    0.786       0.821       +0.035
+Random(0.5)   4    0.857       0.929       +0.072
+Random(0.5)   6    0.818       0.864       +0.046
+Random(0.5)   8    0.808       0.846       +0.038
+
+Across all configurations, the average ratio at p=1 is 0.829, going up to 0.874 at p=2, which is an average improvement of +0.044. Ring graphs give the highest ratios consistently, which makes sense since their regular structure maps well to the QAOA cost operator. Complete graphs produce the lowest ratios because of the larger number of edges increasing circuit complexity. The improvement from p=2 is bigger for small graphs (4 nodes) and gets smaller as graph size grows, consistent with deeper circuits accumulating more noise. All ratios are above the 0.5 random partitioning baseline, and the values obtained are in line with theoretical bounds from the literature [3, 16].
+
+6.4 Noise Sensitivity
+
+Both Grover's algorithm and QAOA are tested under depolarizing and thermal relaxation noise to validate the circuit depth constraints used by the hardware feasibility gate.
+
+Grover's algorithm degrades significantly with noise, and the degradation gets worse as qubit count increases. At 3 qubits the success probability drops from 0.945 (ideal) to 0.873 at 1% depolarizing error, a 7.6% degradation. At 7 qubits, degradation reaches 95.5%, making the circuit output practically random. This is expected since Grover's needs O(sqrt(N)) iterations and each iteration contains multi-controlled gates with depth proportional to n, so total circuit depth grows as O(n * sqrt(2^n)).
+
+QAOA shows considerably more resistance to noise. With p=1 on an 8-node ring graph, the approximation ratio drops from 0.813 (ideal) to about 0.700 at 1% depolarizing error, roughly 14% degradation. QAOA circuits are shallow (depth 2n per layer) and the variational parameter optimization can partially absorb systematic noise effects by adjusting gamma and beta values.
+
+These findings support the depth threshold chosen for the feasibility gate. With the default maximum depth of 100, Grover's circuits for search spaces larger than about 1024 elements get routed to simulator, while QAOA circuits for graphs up to around 50 nodes can still be sent to hardware.
+
+6.5 Testing and Validation
+
+The implementation is covered by 98 automated tests in six test modules: test_decision_engine.py (27 tests), test_code_generator.py (16 tests), test_executor.py (11 tests), test_problem_analyzer.py (23 tests), test_agent_interface.py (12 tests), and test_integration.py (9 tests). Coverage measured with pytest-cov is 96% of the quantum_agent package. The remaining 4% corresponds mainly to hardware execution paths that need IBM Quantum credentials.
+
+
+7. Discussion
+
+7.1 Deterministic Classification vs. Contextual Understanding
+
+The ablation study shows a trade-off between deterministic rules and LLM-based reasoning. The framework produces identical output for identical input, which is useful for debugging and reproducing results. But it cannot interpret context outside of its pattern vocabulary. If a compliance search is described as "checking every entry for violations," the framework needs to detect that "checking" implies an oracle and "every entry" suggests exhaustive search. If one of these patterns is not matched, classification fails silently.
+
+The LLM can understand the intent behind varied formulations and brings general knowledge about what compliance checking involves. On the other hand, it reacts to surface-level cues, and including the word "quantum" in a description makes the LLM more likely to recommend a quantum algorithm, even when there is no actual advantage. This behavior is consistent with what Perez et al. [18] describe as sycophantic tendencies in language models.
+
+A practical deployment could combine both: the deterministic framework as primary classifier, with the LLM overriding it only when LLM confidence is high and framework confidence is low. This fusion is not implemented in the current version, but the architecture supports it since both systems produce confidence scores.
+
+7.2 Limitations
+
+The framework covers only three quantum algorithms. Other NISQ-relevant algorithms like QSVM [19] and quantum walks [20] are not included. The pattern-based problem analyzer works well for standard formulations but misses descriptions using non-typical phrasing. The QAOA evaluation relies on brute-force parameter optimization with COBYLA, which becomes impractical beyond approximately 20 qubits, so more advanced strategies such as those studied by Zhou et al. [21] would be needed. The noise models are simplified since actual IBM hardware has crosstalk, measurement errors, and qubit-specific error rates not captured by uniform models. The adversarial benchmark contains only 12 problems and was designed by the authors, which can introduce bias.
+
+7.3 Implications for Agent Design
+
+The results indicate that autonomous agents benefit from structured decision modules for specialized domains rather than depending only on general LLM knowledge. On standard problems the framework reaches 100% versus 67-73% for the LLM, showing that deterministic logic performs better when decision criteria are well-defined. The gap narrows on adversarial problems (75% vs. 67%), suggesting the two approaches become more comparable when input is deliberately ambiguous.
+
+This observation is not specific to quantum computing. Any domain where decisions involve quantitative thresholds, hardware constraints, or multi-step reasoning could benefit from a similar structured tool. The pattern of natural language extraction, deterministic classification, constraint gating, and code generation is general enough to be applied to other specialized code generation domains.
+
+
+8. Conclusion
+
+This paper presented a decision framework for quantum code generation designed for integration with autonomous agent systems. The framework uses a three-stage pipeline consisting of feature extraction from natural language, quantum advantage classification, and hardware feasibility gating, to produce structured, reproducible recommendations about whether a given problem should be solved with quantum or classical computing.
+
+Three NISQ-compatible algorithms are supported (Grover's search, QAOA, VQE) and the evaluation covers 27 benchmark problems including 12 adversarial cases. The ablation study shows that the framework achieves higher accuracy than a standalone LLM (100% vs. 67-73% on standard problems, 75% vs. 67% on adversarial) and that the two systems fail on different problem categories, making them complementary. QAOA approximation ratios between 0.829 and 0.874 are obtained across multiple graph topologies, and the noise analysis confirms that the circuit depth thresholds used by the feasibility gate are appropriate for current NISQ hardware.
+
+The framework is integrated with the Agent Zero autonomous agent platform and validated through 98 automated tests at 96% code coverage.
+
+Future directions include extending algorithm coverage, incorporating real-time hardware calibration data into the feasibility gate, and implementing a fusion strategy that combines deterministic classification with LLM contextual understanding for improved accuracy on ambiguous inputs.
+
+
+References
+
+1. Preskill, J.: Quantum Computing in the NISQ era and beyond. Quantum 2, 79 (2018)
+2. Grover, L.K.: A fast quantum mechanical algorithm for database search. In: Proceedings of the 28th Annual ACM Symposium on Theory of Computing (STOC), pp. 212-219. ACM, Philadelphia (1996)
+3. Farhi, E., Goldstone, J., Gutmann, S.: A Quantum Approximate Optimization Algorithm. arXiv preprint arXiv:1411.4028 (2014)
+4. Peruzzo, A., McClean, J., Shadbolt, P., et al.: A variational eigenvalue solver on a photonic quantum processor. Nature Communications 5, 4213 (2014)
+5. Chow, J.M., Dial, O., Gambetta, J.M.: IBM Quantum breaks the 100-qubit processor barrier. IBM Research Blog (2021), https://research.ibm.com/blog/127-qubit-quantum-processor-eagle, last accessed 2025/04/10
+6. Yao, S., Zhao, J., Yu, D., et al.: ReAct: Synergizing Reasoning and Acting in Language Models. In: International Conference on Learning Representations (ICLR). OpenReview (2023)
+7. Schick, T., Dwivedi-Yu, J., Dessi, R., et al.: Toolformer: Language Models Can Teach Themselves to Use Tools. In: Advances in Neural Information Processing Systems, vol. 36. Curran Associates (2023)
+8. Qiskit contributors: Qiskit: An Open-source Framework for Quantum Computing (2023), https://github.com/Qiskit/qiskit, last accessed 2025/04/10
+9. Shor, P.W.: Polynomial-Time Algorithms for Prime Factorization and Discrete Logarithms on a Quantum Computer. SIAM Journal on Computing 26(5), 1484-1509 (1997)
+10. Kandala, A., Mezzacapo, A., Temme, K., et al.: Hardware-efficient variational quantum eigensolver for small molecules and quantum magnets. Nature 549, 242-246 (2017)
+11. Alam, M., Ash-Saki, A., Ghosh, S.: Circuit Compilation Methodologies for Quantum Approximate Optimization Algorithm. In: IEEE/ACM International Symposium on Microarchitecture (MICRO), pp. 215-228. IEEE (2020)
+12. Biamonte, J., Wittek, P., Pancotti, N., et al.: Quantum machine learning. Nature 549, 195-202 (2017)
+13. Rice, J.R.: The Algorithm Selection Problem. Advances in Computers 15, 65-118 (1976)
+14. Harrow, A.W., Hassidim, A., Lloyd, S.: Quantum Algorithm for Linear Systems of Equations. Physical Review Letters 103(15), 150502 (2009)
+15. Google Quantum AI: Hartree-Fock on a superconducting qubit quantum computer. Science 369, 1084-1089 (2020)
+16. Guerreschi, G.G., Matsuura, A.Y.: QAOA for Max-Cut requires hundreds of qubits for quantum speed-up. Scientific Reports 9, 6903 (2019)
+17. Powell, M.J.D.: A Direct Search Optimization Method That Models the Objective and Constraint Functions by Linear Interpolation. In: Advances in Optimization and Numerical Analysis, pp. 51-67. Springer, Dordrecht (1994)
+18. Perez, E., Ringer, S., Lukosiute, K., et al.: Discovering Language Model Behaviors with Model-Written Evaluations. In: Findings of the Association for Computational Linguistics (ACL), pp. 13387-13434. ACL (2023)
+19. Havlicek, V., Corcoles, A.D., Temme, K., et al.: Supervised learning with quantum-enhanced feature spaces. Nature 567, 209-212 (2019)
+20. Childs, A.M., Goldstone, J.: Spatial search by quantum walk. Physical Review A 70(2), 022314 (2004)
+21. Zhou, L., Wang, S.T., Choi, S., et al.: Quantum Approximate Optimization Algorithm: Performance, Mechanism, and Implementation on Near-Term Devices. Physical Review X 10(2), 021067 (2020)
