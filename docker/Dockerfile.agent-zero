@@ -1,0 +1,44 @@
+# Agent Zero image with the Qiskit runtime baked in.
+#
+# Gotchas this file works around:
+#
+# 1. The base frdel/agent-zero-run image has no quantum stack. Installing it with
+#    `docker exec ... uv pip install` works but is lost whenever the container is
+#    recreated (e.g. `docker compose up -d` after editing compose). Baking it into
+#    a derived image makes the environment reproducible across recreates.
+#
+# 2. Agent Zero itself runs from the virtualenv at /opt/venv (Python 3.12), NOT
+#    from the system interpreter (/usr/bin/python3, Python 3.13). A plain
+#    `uv pip install --system` lands in the system interpreter, so the agent's
+#    own process still cannot import qiskit. We must target /opt/venv explicitly.
+#
+# 3. Installing qiskit unconstrained silently UPGRADES Agent Zero's own pinned
+#    dependencies and breaks it in ways that only surface at runtime:
+#      - numpy 1.26 -> 2.5 breaks whisper/numba ("Numba needs NumPy 2.2 or less")
+#      - pydantic 2.10 -> 2.13 breaks mcp_server ("cannot specify both default
+#        and default_factory"), which crash-loops the web UI on port 80.
+#    So we freeze the base image's resolved versions into a constraints file and
+#    install the quantum stack against it. Nothing pre-existing can move; if a
+#    quantum package genuinely demands a newer pin, the build fails loudly here
+#    rather than producing a subtly broken container.
+#
+# Built automatically by agent-zero/docker-compose.yml.
+
+FROM frdel/agent-zero-run:latest
+
+RUN uv pip freeze --python /opt/venv/bin/python > /tmp/base-constraints.txt \
+ && uv pip install --python /opt/venv/bin/python \
+      --constraint /tmp/base-constraints.txt \
+      qiskit \
+      qiskit-aer \
+      qiskit-ibm-runtime
+
+# Fail the build if the pinned set is inconsistent. Note this can only check
+# installed packages: the base image ships an essentially empty /a0 and fetches
+# the Agent Zero source at container startup, so the agent's own import chain
+# (python.helpers.mcp_server, the thing pydantic upgrades break) is not
+# importable at build time and must be verified against a running container.
+RUN /opt/venv/bin/python -c "\
+import numpy, pydantic, qiskit, qiskit_aer, qiskit_ibm_runtime, numba, whisper; \
+print('numpy', numpy.__version__, '| pydantic', pydantic.VERSION, '| qiskit', qiskit.__version__); \
+print('numba', numba.__version__, '+ whisper OK')"

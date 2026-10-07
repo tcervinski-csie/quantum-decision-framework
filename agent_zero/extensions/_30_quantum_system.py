@@ -2,9 +2,17 @@
 
 Drop this file into Agent Zero's `python/extensions/system_prompt/` directory.
 It appends quantum computing awareness to the agent's system prompt.
+
+Agent Zero discovers extensions by scanning for `Extension` subclasses, so this
+must be a class — a module-level `execute()` function is silently ignored.
+The hook receives the prompt list as the `system_prompt` keyword argument.
 """
 
-import os
+from typing import Any
+
+from python.helpers.extension import Extension
+from agent import LoopData
+
 
 QUANTUM_PROMPT = """
 
@@ -31,7 +39,13 @@ Never claim quantum speedup without the decision tool confirming it.
 """
 
 
-async def execute(agent, prompts: list, **kwargs):
-    """Append quantum reasoning context to the system prompt."""
-    prompts.append(QUANTUM_PROMPT)
-    return prompts
+class QuantumSystemPrompt(Extension):
+    """Appends quantum-computing guidance to the agent's system prompt."""
+
+    async def execute(
+        self,
+        system_prompt: list[str] = [],
+        loop_data: LoopData = LoopData(),
+        **kwargs: Any,
+    ):
+        system_prompt.append(QUANTUM_PROMPT)
