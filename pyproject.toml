@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "quantum-agent"
 version = "0.1.0"
 description = "Paradigm-Aware Code Agent for Hybrid Classical-Quantum Task Routing"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 # Pinned exactly, not floored. The published noise-sensitivity figures depend on
 # the Qiskit version: mcx decomposition changed between 1.x and 2.x, which changes
