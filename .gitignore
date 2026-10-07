@@ -15,3 +15,11 @@ htmlcov/
 .DS_Store
 make_presentation.py
 make_presentation_v2.py
+
+# credentials — never commit (repo is public)
+apik
+*.key
+*_key
+*_key.txt
+.anthropic*
+secrets/
