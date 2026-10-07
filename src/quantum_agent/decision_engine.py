@@ -55,10 +55,19 @@ class ProblemFeatures:
 
 @dataclass
 class HardwareConstraints:
-    """Constraints of the target quantum backend."""
+    """Constraints of the target quantum backend.
+
+    `backend_name` selects how circuit depth is obtained. Left as None, depth comes
+    from the analytic estimate in `estimate_resources`. Set to a fake-backend name
+    (e.g. "fake_brisbane"), the circuit is compiled for that device's real coupling
+    map and basis gates and the measured depth is used instead. The analytic
+    estimate understates compiled depth by 20-160x for Grover and the gap widens
+    with problem size, so the two paths can route very differently.
+    """
     max_qubits: int = 127          # IBM Eagle
     max_circuit_depth: int = 100   # practical NISQ limit
     connectivity: str = "heavy_hex" # IBM topology
+    backend_name: Optional[str] = None  # None = analytic depth; else measure it
 
 
 @dataclass
@@ -122,11 +131,27 @@ _CLASSIFICATION_TABLE: dict[ProblemType, tuple[QuantumAdvantage, QuantumAlgorith
 }
 
 
-def classify_advantage(features: ProblemFeatures) -> tuple[QuantumAdvantage, QuantumAlgorithm, float]:
+def classify_advantage(
+    features: ProblemFeatures,
+    backend: str = "rules",
+) -> tuple[QuantumAdvantage, QuantumAlgorithm, float]:
     """Classify quantum advantage based on problem features.
 
     Returns (advantage_level, recommended_algorithm, confidence).
+
+    backend:
+        "rules"  — the deterministic table below (default; unchanged behaviour).
+        "neural" — a distilled feedforward network. Requires the optional torch
+                   dependency and a trained checkpoint; see training/.
     """
+    if backend == "neural":
+        # Imported lazily so torch stays optional for the default path.
+        from quantum_agent.neural.model import predict
+
+        return predict(features)
+    if backend != "rules":
+        raise ValueError(f"Unknown classification backend: {backend!r}")
+
     # Unknown problem types default to classical.
     if features.problem_type == ProblemType.OTHER:
         return (QuantumAdvantage.CLASSICAL_PREFERRED, QuantumAlgorithm.NONE, 0.5)
@@ -222,10 +247,15 @@ def decide(
     has_structure: bool = False,
     num_variables: int = 0,
     hardware: Optional[HardwareConstraints] = None,
+    backend: str = "rules",
 ) -> Decision:
     """Run the full three-stage decision pipeline.
 
     This is the main entry point for the framework.
+
+    `backend` selects the Stage 2 classifier only. Stages 1 and 3 are always
+    deterministic — the feasibility gate checks hard hardware limits, so an
+    approximation of it could admit a circuit the backend cannot run.
     """
     # Stage 1
     features = extract_features(
@@ -237,7 +267,7 @@ def decide(
     )
 
     # Stage 2
-    advantage, algorithm, confidence = classify_advantage(features)
+    advantage, algorithm, confidence = classify_advantage(features, backend=backend)
 
     # If classical preferred or no current advantage, short-circuit.
     if algorithm == QuantumAlgorithm.NONE:
@@ -254,6 +284,17 @@ def decide(
 
     # Stage 3
     est_qubits, est_depth = estimate_resources(algorithm, features)
+
+    # When a backend is named, replace the analytic depth with the real compiled
+    # depth for that device. Imported lazily to avoid a module-level import cycle
+    # through code_generator.
+    if hardware is not None and hardware.backend_name:
+        from quantum_agent.transpilation import transpiled_depth
+
+        est_depth = transpiled_depth(
+            algorithm, est_qubits, est_depth, hardware.backend_name
+        )
+
     hw_feasible, target = check_feasibility(est_qubits, est_depth, hardware)
 
     return Decision(
