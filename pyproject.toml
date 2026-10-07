@@ -7,17 +7,28 @@ name = "quantum-agent"
 version = "0.1.0"
 description = "Paradigm-Aware Code Agent for Hybrid Classical-Quantum Task Routing"
 requires-python = ">=3.10"
+# Pinned exactly, not floored. The published noise-sensitivity figures depend on
+# the Qiskit version: mcx decomposition changed between 1.x and 2.x, which changes
+# the two-qubit gate count and therefore how much depolarizing error accumulates.
+# An unbounded ">=" meant two checkouts of this project resolved to different
+# versions and produced different numbers. Regenerate every reported figure if any
+# of these change.
 dependencies = [
-    "qiskit>=1.0",
-    "qiskit-aer>=0.13",
-    "qiskit-ibm-runtime>=0.20",
-    "numpy>=1.24",
+    "qiskit==2.5.2",
+    "qiskit-aer==0.17.2",
+    "qiskit-ibm-runtime==0.49.0",
+    "numpy==2.5.3",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.0",
+]
+# Learned Stage 2 backend. Optional: the default "rules" path never imports torch,
+# and the test suite skips the neural tests when it is absent.
+neural = [
+    "torch>=2.0",
 ]
 
 [tool.setuptools.packages.find]

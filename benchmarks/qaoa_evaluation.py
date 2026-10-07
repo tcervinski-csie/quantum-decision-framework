@@ -70,6 +70,12 @@ def random_graph(n: int, p: float = 0.5, seed: int = 42) -> list[tuple[int, int]
     return edges
 
 
+# Fixes shot sampling so the reported approximation ratios are reproducible.
+# COBYLA restarts were already seeded; the simulator sampling was not, which made
+# Table 3 move by a few thousandths between runs.
+SIM_SEED = 1234
+
+
 def optimize_qaoa(n_qubits: int, edges: list[tuple[int, int]], p: int = 1, shots: int = 1024) -> dict:
     """Run QAOA with classical parameter optimization.
 
@@ -100,7 +106,7 @@ def optimize_qaoa(n_qubits: int, edges: list[tuple[int, int]], p: int = 1, shots
     optimal_cut = brute_force_maxcut(n_qubits, edges)
 
     def cost_fn(params):
-        result = execute_on_simulator(circuit, shots=shots, parameter_values=list(params))
+        result = execute_on_simulator(circuit, shots=shots, parameter_values=list(params), seed=SIM_SEED)
         if not result.success:
             return 0.0
         return -expected_cut(result.counts, edges, shots)
@@ -119,7 +125,7 @@ def optimize_qaoa(n_qubits: int, edges: list[tuple[int, int]], p: int = 1, shots
             best_params = opt.x
 
     # Final high-shot run with best parameters
-    final = execute_on_simulator(circuit, shots=shots * 4, parameter_values=list(best_params))
+    final = execute_on_simulator(circuit, shots=shots * 4, parameter_values=list(best_params), seed=SIM_SEED)
     final_cut = expected_cut(final.counts, edges, final.shots)
     approx_ratio = final_cut / optimal_cut if optimal_cut > 0 else 0.0
 

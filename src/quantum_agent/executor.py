@@ -51,6 +51,7 @@ def execute_on_simulator(
     circuit: QuantumCircuit,
     shots: int = 1024,
     parameter_values: Optional[list[float]] = None,
+    seed: Optional[int] = None,
 ) -> ExecutionResult:
     """Run a circuit on the local Aer simulator.
 
@@ -58,6 +59,9 @@ def execute_on_simulator(
         circuit: The quantum circuit to execute.
         shots: Number of measurement shots (default 1024).
         parameter_values: If the circuit has parameters, provide values here.
+        seed: Fixes the sampling RNG. Default None keeps shot noise, which is
+            correct for ordinary use; benchmarks that report published figures must
+            pass a seed, or repeated runs give different numbers.
     """
     try:
         # Bind parameters if needed
@@ -69,7 +73,7 @@ def execute_on_simulator(
             circuit = bind_parameters(circuit, parameter_values)
 
         simulator = AerSimulator()
-        result = simulator.run(circuit, shots=shots).result()
+        result = simulator.run(circuit, shots=shots, seed_simulator=seed).result()
         counts = result.get_counts(circuit)
 
         # Find most likely outcome
@@ -81,7 +85,7 @@ def execute_on_simulator(
             target=ExecutionTarget.QUANTUM_SIMULATE,
             most_likely=most_likely,
             success=True,
-            metadata={"simulator": "aer", "method": "automatic"},
+            metadata={"simulator": "aer", "method": "automatic", "seed": seed},
         )
     except Exception as e:
         return ExecutionResult(
