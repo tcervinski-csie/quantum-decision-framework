@@ -95,12 +95,17 @@ _STRUCTURE_PATTERNS = [
     r"cyclic", r"regular", r"structured",
 ]
 
+# Allows a short run of qualifiers between the number and the noun it counts, so
+# "65,536 employee records" reads the same as "65,536 records". Bounded at two
+# words and restricted to alphabetic tokens to avoid matching across clauses.
+_QUALIFIERS = r"(?:[a-z][a-z-]*\s+){0,2}?"
+
 # Patterns to extract numeric sizes.
 _SIZE_PATTERNS = [
-    (r"(\d+)\s*(?:qubit|spin|atom|node|vert\w*|variable|cit\w*)", "num_variables"),
-    (r"(\d+)\s*(?:element|item|record|entr\w*|row)", "search_space"),
+    (rf"(\d+)\s*{_QUALIFIERS}(?:qubit|spin|atom|node|vert\w*|variable|cit\w*)", "num_variables"),
+    (rf"(\d+)\s*{_QUALIFIERS}(?:element|item|record|entr\w*|row)", "search_space"),
     (r"(?:space|size|domain)\s*(?:of|is|=|:)\s*(\d+)", "search_space"),
-    (r"(\d+)\s*(?:bit|digit)", "bits"),
+    (rf"(\d+)\s*{_QUALIFIERS}(?:bit|digit)", "bits"),
     (r"2\s*\^\s*(\d+)", "power_of_two"),
 ]
 

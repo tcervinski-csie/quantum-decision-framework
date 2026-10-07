@@ -6,7 +6,7 @@ Supported algorithms:
 - VQE (quantum simulation with parameterized ansatz)
 """
 
-from math import ceil, pi, sqrt
+from math import asin, ceil, pi, sqrt
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter
@@ -40,6 +40,22 @@ def generate_circuit(decision: Decision) -> QuantumCircuit:
 # ---------------------------------------------------------------------------
 # Grover's Algorithm
 # ---------------------------------------------------------------------------
+
+def optimal_grover_iterations(search_space: int) -> int:
+    """Iterations that maximise the marked state's amplitude for one solution.
+
+    The exact optimum is round(pi / (4 * theta) - 1/2) with sin(theta) = 1/sqrt(N),
+    not the more familiar round(pi/4 * sqrt(N)) approximation. The two disagree at
+    small N in a way that matters: at N=4 the approximation gives 2 iterations, which
+    rotates PAST the target and drops success probability to ~0.25, where the exact
+    formula gives 1 iteration and finds the item with certainty. They also differ at
+    N=128/256/512, where the approximation over-rotates slightly.
+    """
+    if search_space <= 1:
+        return 1
+    theta = asin(1.0 / sqrt(search_space))
+    return max(1, round(pi / (4 * theta) - 0.5))
+
 
 def _build_grover_oracle(n_qubits: int, marked_state: int) -> QuantumCircuit:
     """Build an oracle that flips the phase of |marked_state>.
@@ -97,7 +113,7 @@ def _build_grover_circuit(decision: Decision, marked_state: int = 0) -> QuantumC
     """
     n_qubits = decision.estimated_qubits
     search_space = 2 ** n_qubits
-    n_iterations = max(1, round(pi / 4 * sqrt(search_space)))
+    n_iterations = optimal_grover_iterations(search_space)
 
     qc = QuantumCircuit(n_qubits, n_qubits, name="grover")
 
